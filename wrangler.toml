@@ -1,0 +1,22 @@
+name = "donorbox-moloni-worker"
+main = "src/worker.ts"
+compatibility_date = "2024-05-30"
+
+# Add your secrets via `wrangler secret put <KEY>`.
+
+account_id = "4efa5cd804af038feae75a721eede909"
+
+[observability]
+enabled = false
+head_sampling_rate = 1
+
+[observability.logs]
+enabled = true
+head_sampling_rate = 1
+persist = true
+invocation_logs = true
+
+[observability.traces]
+enabled = false
+persist = true
+head_sampling_rate = 1

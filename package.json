@@ -1,0 +1,13 @@
+{
+  "name": "donorbox-moloni-worker",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --local",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.51.0"
+  }
+}
