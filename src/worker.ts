@@ -4,6 +4,8 @@
 
 interface Env {
   DONORBOX_WEBHOOK_SECRET?: string;
+  MOLONI_USERNAME: string;
+  MOLONI_PASSWORD: string;
   MOLONI_CLIENT_ID: string;
   MOLONI_CLIENT_SECRET: string;
   MOLONI_REFRESH_TOKEN: string;
@@ -137,6 +139,7 @@ function bufferToHex(buffer: ArrayBuffer): string {
 function mapDonorboxPayload(payload: DonorboxPayload): Donation {
   const data = (payload?.data as Record<string, unknown>) || (payload?.donation as Record<string, unknown>) || payload || {};
   const donor = (data.donor as Record<string, unknown>) || (data.donor_info as Record<string, unknown>) || {};
+  const externalId = pickExternalId(payload, data);
 
   const name =
     (donor.name as string) ||
@@ -152,7 +155,7 @@ function mapDonorboxPayload(payload: DonorboxPayload): Donation {
     "Donation";
 
   return {
-    externalId: (data.id as string) || (payload as Record<string, unknown>).id || (payload as Record<string, unknown>).event_id,
+    externalId,
     name,
     email,
     amount,
@@ -160,6 +163,16 @@ function mapDonorboxPayload(payload: DonorboxPayload): Donation {
     campaign,
     raw: data,
   };
+}
+
+function pickExternalId(payload: DonorboxPayload, data: Record<string, unknown>): string | number | undefined {
+  const candidates = [data.id, (payload as Record<string, unknown>).id, (payload as Record<string, unknown>).event_id];
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" || typeof candidate === "number") {
+      return candidate;
+    }
+  }
+  return undefined;
 }
 
 function buildMoloniInvoicePayload(donation: Donation, env: Env): MoloniInvoiceInput {
@@ -215,76 +228,86 @@ class MoloniClient {
 
   async createInvoice(invoicePayload: MoloniInvoiceInput): Promise<unknown> {
     const accessToken = await this.getAccessToken();
-
-    const resp = await fetch(`${MOLONI_API_BASE}/invoices/insert`, {
+  
+    const url = `${MOLONI_API_BASE}/invoices/insert/?access_token=${encodeURIComponent(
+      accessToken,
+    )}&json=true&human_errors=true`;
+  
+    const resp = await fetch(url, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${accessToken}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify(invoicePayload),
     });
-
+  
     if (!resp.ok) {
       const text = await resp.text();
       throw new Error(`HTTP ${resp.status}: ${text}`);
     }
-
+  
     return resp.json();
   }
+  
 
   async sendInvoiceEmail(documentId: string, to: string): Promise<void> {
     const accessToken = await this.getAccessToken();
-
+  
+    const url = `${MOLONI_API_BASE}/invoices/sendEmail/?access_token=${encodeURIComponent(
+      accessToken,
+    )}&json=true&human_errors=true`;
+  
     const body = {
       document_id: documentId,
       email: to,
       company_id: this.env.MOLONI_COMPANY_ID,
     };
-
-    const resp = await fetch(`${MOLONI_API_BASE}/invoices/sendEmail`, {
+  
+    const resp = await fetch(url, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${accessToken}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify(body),
     });
-
+  
     if (!resp.ok) {
       const text = await resp.text();
       throw new Error(`Email send failed: HTTP ${resp.status}: ${text}`);
     }
   }
+  
 
   private async getAccessToken(): Promise<string> {
     const now = Date.now();
     if (this.cachedToken && now < this.tokenExpiresAt) {
       return this.cachedToken;
     }
-
-    const body = new URLSearchParams({
-      grant_type: "refresh_token",
+  
+    const params = new URLSearchParams({
+      grant_type: "password",
       client_id: this.env.MOLONI_CLIENT_ID,
       client_secret: this.env.MOLONI_CLIENT_SECRET,
-      refresh_token: this.env.MOLONI_REFRESH_TOKEN,
+      username: this.env.MOLONI_USERNAME,
+      password: this.env.MOLONI_PASSWORD,
     });
-
-    const resp = await fetch(`${MOLONI_API_BASE}/grant/?grant_type=refresh_token`, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body,
+  
+    const resp = await fetch(`${MOLONI_API_BASE}/grant/?${params.toString()}`, {
+      method: "GET",
     });
-
+  
     if (!resp.ok) {
       const text = await resp.text();
       throw new Error(`Auth failed: HTTP ${resp.status}: ${text}`);
     }
-
+  
     const json = (await resp.json()) as { access_token: string; expires_in?: number };
+  
     const expiresInMs = Number(json.expires_in || 900) * 1000;
     this.cachedToken = json.access_token;
     this.tokenExpiresAt = Date.now() + expiresInMs - 30_000;
+  
     return this.cachedToken;
   }
+
 }
